@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Контейнер безопасности СберБанк Онлайн</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/css/bootstrap.min.css" rel="stylesheet"> <!-- Для оформления -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script> <!-- Для создания графиков -->
+</head>
+<body>
+
+
+<div class="container">
+    <br>
+    <h2>Контейнер безопасности СберБанк Онлайн</h2>
+    <p class="text-muted">Защита от атак через URL (Path Traversal)</p>
+    <hr>
+      <!-- Описание работы контейнера -->
+      <div class="alert alert-info" role="alert">
+        <strong>О работе контейнера:</strong> Контейнер проверяет URL-параметры на наличие опасных конструкций и блокирует подозрительные запросы.
+      </div>
+
+    <!-- Параметры расчета -->
+    <div class="card mt-3">
+        <div class="card-header bg-secondary text-white">Параметры расчета</div>
+        <div class="card-body">
+            <div class="row">
+                <div class="col-md-3"><label>Запросов в час:</label> <input type="number" id="V" class="form-control" value="20000"></div> <!-- Поле ввода чисел, ID="V" (V - количество запросов в час), начальное 20000 -->
+                <div class="col-md-3"><label>Часов:</label> <input type="number" id="T" class="form-control" value="24"></div>
+                <div class="col-md-3"><label>Риск угрозы:</label> <input type="number" id="R" class="form-control" step="0.01" value="0.25"></div>
+                <div class="col-md-3"><label>Скорость обучения (α):</label> <input type="number" id="alpha" class="form-control" step="0.01" value="0.3"></div>
+            </div>
+            <div class="row mt-2">
+                <div class="col-md-4"><label>Начальный риск (до обучения):</label> <input type="number" id="Rinit" class="form-control" step="0.01" value="0.20"></div>
+                <div class="col-md-4"><label>Базовый риск (после обучения):</label> <input type="number" id="Rbase" class="form-control" step="0.01" value="0.03"></div>
+                <div class="col-md-4"><label>Эффективность защиты:</label> <input type="number" id="E" class="form-control" step="0.01" value="0.95"></div>
+            </div>
+            <button class="btn btn-primary mt-3" onclick="calculate()">Обновить графики</button>
+        </div>
+    </div>
+
+    <!-- Статистика -->
+    <div class="row mt-3 text-center" id="stats">
+        <div class="col-md-4"><div class="alert alert-warning">Опасных запросов (Всего за сутки без защиты): <b id="total_dangerous">0</b></div></div>
+        <div class="col-md-4"><div class="alert alert-success">Прорвалось(через обученную систему): <b id="total_passed">0</b></div></div>
+        <div class="col-md-4"><div class="alert alert-danger">Заблокировано (обученной системой): <b id="total_blocked">0</b></div></div>
+    </div>
+    <div class="text-center"><span id="efficiency" class="badge bg-success p-2">Эффективность: 0%</span></div>
+
+    <!-- Графики-->
+    <div class="row mt-3">
+        <div class="col-md-6"><canvas id="chart1"></canvas><p class="text-center">Способ 1: Уменьшение остатка необработанных запросов</p></div>
+        <div class="col-md-6"><canvas id="chart2"></canvas><p class="text-center">Способ 2: Уменьшение количества опасных запросов (при обучении)</p></div>
+    </div>
+    <div class="row mt-3">
+        <div class="col-md-6"><canvas id="chart3"></canvas><p class="text-center">Способ 1: Количество заблокированных запросов в каждый час</p></div>
+        <div class="col-md-6"><canvas id="chart4"></canvas><p class="text-center">Способ 2: Количество опасных запросов в каждый час (при обучении)</p></div>
+    </div>
+
+    <!-- Проверка URL -->
+    <div class="card mt-3">
+        <div class="card-header bg-success text-white">Проверка URL на опасность</div>
+        <div class="card-body">
+            <input type="text" id="urlInput" class="form-control" placeholder="statement.pdf или ../../../etc/passwd">
+            <button class="btn btn-primary mt-2" onclick="checkUrl()">Проверить</button>
+            <div id="resultContainer" class="result-box mt-3" style="display:none;"></div>
+        </div>
+    </div>
+
+
+       <!-- Для обновления данных-->
+<script>
+    let chart1, chart2, chart3, chart4;
+
+    function calculate() { // Пересчет всей статистики
+        let V = parseFloat(document.getElementById('V').value); // Запросов в час
+        let T = parseFloat(document.getElementById('T').value); // Часов
+        let R = parseFloat(document.getElementById('R').value); // Риск угрозы
+        let alpha = parseFloat(document.getElementById('alpha').value); // Скорость обучения
+        let Rinit = parseFloat(document.getElementById('Rinit').value); // Нач. риск
+        let Rbase = parseFloat(document.getElementById('Rbase').value); // Базовый риск
+        let E = parseFloat(document.getElementById('E').value); // Эффективность защиты
+
+        let total_dangerous = V * T * R; // Всего опасных без защиты
+        let hours = [...Array(T).keys()].map(i => i + 1); // Массив часов
+
+        // Способ 1: остаток запросов
+        let remaining = []; // Массив для остатков
+        let remaining_sum = V * T; // Нач. кол-во запросов
+        for (let i = 0; i < T; i++) {
+            remaining_sum -= V * R; // Опасн. кажд. час
+            remaining.push(remaining_sum); // Добав. в массив
+        }
+
+        // Способ 2: прорыв и блокировки
+        let passed = []; // Прорав. запросы
+        let blocked = []; // Заблок. запросы
+        let total_passed = 0; // Сумма прорвав. за все часы
+        for (let i = 0; i < T; i++) {
+            let risk = Rbase + (Rinit - Rbase) * Math.pow(1 - alpha, i); // Данамич. риск
+            let p = V * risk; // Прорвалось в этот час
+            passed.push(p);
+            let b = V * R - p; // Заблок.
+            blocked.push(b);
+            total_passed += p;
+        }
+        let total_blocked = total_dangerous - total_passed; // Всего блок.
+        let efficiency = (1 - total_passed / total_dangerous) * 100; // Эффективность
+
+        // Обновляем статистику
+        document.getElementById('total_dangerous').innerText = Math.round(total_dangerous);
+        document.getElementById('total_passed').innerText = Math.round(total_passed);
+        document.getElementById('total_blocked').innerText = Math.round(total_blocked);
+        document.getElementById('efficiency').innerHTML = `Эффективность: ${efficiency.toFixed(1)}%`;
+
+        // График 1 
+        if (chart1) chart1.destroy(); // Удалить график если был
+        chart1 = new Chart(document.getElementById('chart1'), { 
+            type: 'line', // Линейный
+            data: { labels: hours, datasets: [{ label: 'Остаток запросов', data: remaining, borderColor: 'blue', fill: true }] }
+        });
+
+        // График 2 
+        if (chart2) chart2.destroy();
+        chart2 = new Chart(document.getElementById('chart2'), { 
+            type: 'line', 
+            data: { labels: hours, datasets: [{ label: 'Прорвалось', data: passed, borderColor: 'red', fill: true }] }
+        });
+
+        // График 3 
+        if (chart3) chart3.destroy();
+        chart3 = new Chart(document.getElementById('chart3'), { 
+            type: 'bar', 
+            data: { labels: hours, datasets: [{ label: 'Опасных запросов в час', data: Array(T).fill(V * R), backgroundColor: 'green' }] }
+        });
+
+        // График 4 
+        if (chart4) chart4.destroy();
+        chart4 = new Chart(document.getElementById('chart4'), { 
+            type: 'bar', 
+            data: { labels: hours, datasets: [
+                { label: 'Прорвалось', data: passed, backgroundColor: 'orange' }, 
+                { label: 'Заблокировано', data: blocked, backgroundColor: 'green' }
+            ] }
+        });
+    }
+
+    // Проверка URL на опасность
+    function isDangerous(url) {
+        if (!url) return false; // Если пусто - безопасно
+        let patterns = ["../", "..\\", "/etc/passwd", "%2E%2E%2F", "%252E%252E%252F", "%00"]; // Паттерны
+        for (let p of patterns) if (url.toLowerCase().includes(p.toLowerCase())) return true; // Если найден паттерн - опасно
+        return false; // Паттернов не найдено - безопасно
+    }
+
+    function checkUrl() {
+        let url = document.getElementById('urlInput').value; // Берет текст из поля
+        let result = document.getElementById('resultContainer'); // Получает блок для результата
+        if (!url) { alert('Введите URL'); return; } // Если пусто - ошибка
+        let blocked = isDangerous(url); // Проверка опасности
+        result.style.display = 'block'; // Показывает блок результата
+        result.innerHTML = `<p><strong>Запрос:</strong> <code>${url}</code></p>
+            <p><strong>Статус:</strong> ${blocked ? '<span class="badge bg-danger">ЗАБЛОКИРОВАНО</span>' : '<span class="badge bg-success">ПРОПУЩЕНО</span>'}</p>
+            ${blocked ? '<p>Причина: Обнаружена опасная конструкция Path Traversal</p>' : ''}`;
+    }
+
+    calculate();
+    document.getElementById('urlInput').addEventListener('keypress', e => { if (e.key === 'Enter') checkUrl(); }); // При нажатии энтера выводит ответ
+</script>
+</body>
+</html>
